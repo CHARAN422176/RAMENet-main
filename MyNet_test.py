@@ -38,8 +38,10 @@ for dataset in test_datasets:
     save_path = './pre_map/' + dataset + '/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    image_root = dataset_path + dataset + '/Imgs/'
-    gt_root = dataset_path + dataset + '/GT/'
+    # image_root = dataset_path + dataset + '/Imgs/'
+    image_root = '/kaggle/input/eorssd/test-images/'
+    # gt_root = dataset_path + dataset + '/GT/'
+    gt_root = '/kaggle/input/eorssd/test-labels'
     test_loader = test_dataset(image_root, gt_root, opt.testsize)
     cost_time = []
     mae_sum = 0
