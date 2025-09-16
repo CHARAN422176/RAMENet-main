@@ -10,28 +10,48 @@ from data_cod import test_dataset
 # ======================
 # Metrics functions
 # ======================
-def mae(pred, gt):
+def mae_metric(pred, gt):
     return np.mean(np.abs(pred - gt))
 
-def f_measure(pred, gt, beta=0.3):
-    pred_bin = (pred >= 0.5).astype(np.float32)
-    tp = np.sum(pred_bin * gt)
-    prec = tp / (np.sum(pred_bin) + 1e-8)
-    rec = tp / (np.sum(gt) + 1e-8)
-    return (1 + beta ** 2) * prec * rec / (beta ** 2 * prec + rec + 1e-8)
+def iou_metric(pred, gt):
+    intersection = np.logical_and(pred, gt).sum()
+    union = np.logical_or(pred, gt).sum()
+    return intersection / (union + 1e-8)
 
-def e_measure(pred, gt):
-    pred_mean = pred.mean()
-    gt_mean = gt.mean()
-    align = 2 * (pred - pred_mean) * (gt - gt_mean) / ((pred - pred_mean)**2 + (gt - gt_mean)**2 + 1e-8)
-    return np.mean(align)
+def f_measure(pred, gt, beta2=0.3):
+    tp = np.logical_and(pred == 1, gt == 1).sum()
+    fp = np.logical_and(pred == 1, gt == 0).sum()
+    fn = np.logical_and(pred == 0, gt == 1).sum()
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
+    return (1 + beta2) * precision * recall / (beta2 * precision + recall + 1e-8)
 
-def s_measure(pred, gt, alpha=0.5):
+def s_measure(pred, gt):
+    pred = pred.astype(np.float32)
+    gt = gt.astype(np.float32)
+    alpha = 0.5
     fg = pred[gt == 1]
     bg = pred[gt == 0]
-    o_fg = fg.mean() if fg.size > 0 else 0
-    o_bg = bg.mean() if bg.size > 0 else 0
-    return alpha * o_fg + (1 - alpha) * o_bg
+    o_fg = np.mean(fg) if fg.size > 0 else 0
+    o_bg = np.mean(bg) if bg.size > 0 else 0
+    object_score = alpha * o_fg + (1 - alpha) * (1 - o_bg)
+    h, w = gt.shape
+    y, x = h // 2, w // 2
+    gt_quads = [gt[:y, :x], gt[:y, x:], gt[y:, :x], gt[y:, x:]]
+    pr_quads = [pred[:y, :x], pred[:y, x:], pred[y:, :x], pred[y:, x:]]
+    region_score = 0
+    for gq, pq in zip(gt_quads, pr_quads):
+        region_score += np.mean(1 - np.abs(pq - gq))
+    region_score /= 4.0
+    return 0.5 * (object_score + region_score)
+
+def e_measure(pred, gt):
+    pred = pred.astype(np.float32)
+    gt = gt.astype(np.float32)
+    fm = np.mean(pred)
+    gt_mean = np.mean(gt)
+    align_matrix = 2 * (pred - fm) * (gt - gt_mean) / ((pred - fm) ** 2 + (gt - gt_mean) ** 2 + 1e-8)
+    return np.mean((align_matrix + 1) ** 2 / 4)
 
 # ======================
 # Parse arguments
@@ -39,18 +59,14 @@ def s_measure(pred, gt, alpha=0.5):
 parser = argparse.ArgumentParser()
 parser.add_argument('--testsize', type=int, default=384, help='testing size')
 parser.add_argument('--gpu_id', type=str, default='0', help='select gpu id')
-parser.add_argument('--test_path',type=str,default='./Test/',help='test dataset path')
+parser.add_argument('--test_path', type=str, default='./Test/', help='test dataset path')
 opt = parser.parse_args()
 
 # ======================
 # GPU setup
 # ======================
-if opt.gpu_id == '0':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    print('USE GPU 0')
-elif opt.gpu_id == '1':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-    print('USE GPU 1')
+os.environ["CUDA_VISIBLE_DEVICES"] = opt.gpu_id
+print(f'USE GPU {opt.gpu_id}')
 
 # ======================
 # Load model
@@ -82,24 +98,27 @@ for dataset in test_datasets:
     for i in range(test_loader.size):
         image, gt, name, image_for_post = test_loader.load_data()
         gt = np.asarray(gt, np.float32)
-        gt /= (gt.max() + 1e-8)
-        image = image.cuda()
+        gt /= (gt.max() + 1e-8)  # normalize GT
 
+        image = image.cuda()
         start_time = time.perf_counter()
-        outputs = model(image)          # model returns 8 outputs
-        res = outputs[4]                # take the first sigmoid output
+        outputs = model(image)     # 8 outputs
+        res = outputs[4]           # main sigmoid output
         cost_time.append(time.perf_counter() - start_time)
 
         res = F.upsample(res, size=gt.shape, mode='bilinear', align_corners=False)
         res = res.data.cpu().numpy().squeeze()
         res = (res - res.min()) / (res.max() - res.min() + 1e-8)
-        cv2.imwrite(save_path + name, res * 255)
+        cv2.imwrite(save_path + name, (res * 255).astype(np.uint8))
 
-        # compute metrics
-        mae_sum += mae(res, gt)
-        f_sum += f_measure(res, gt)
+        # Metrics
+        pred_bin = (res >= 0.5).astype(np.float32)
+        gt_bin = (gt >= 0.5).astype(np.float32)
+
+        mae_sum += mae_metric(res, gt)
+        f_sum += f_measure(pred_bin, gt_bin)
         e_sum += e_measure(res, gt)
-        s_sum += s_measure(res, gt)
+        s_sum += s_measure(pred_bin, gt_bin)
 
     # Average metrics
     mae_avg = mae_sum / test_loader.size
@@ -107,7 +126,7 @@ for dataset in test_datasets:
     e_avg = e_sum / test_loader.size
     s_avg = s_sum / test_loader.size
 
-    cost_time.pop(0)  # ignore first
+    cost_time.pop(0)  # remove first iteration
     fps = test_loader.size / np.sum(cost_time)
 
     print(f"{dataset} - MAE: {mae_avg:.4f}, F-measure: {f_avg:.4f}, E-measure: {e_avg:.4f}, S-measure: {s_avg:.4f}")
