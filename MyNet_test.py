@@ -41,7 +41,7 @@ for dataset in test_datasets:
     # image_root = dataset_path + dataset + '/Imgs/'
     image_root = '/kaggle/input/eorssd/test-images/'
     # gt_root = dataset_path + dataset + '/GT/'
-    gt_root = '/kaggle/input/eorssd/test-labels'
+    gt_root = '/kaggle/input/eorssd/test-labels/'
     test_loader = test_dataset(image_root, gt_root, opt.testsize)
     cost_time = []
     mae_sum = 0
