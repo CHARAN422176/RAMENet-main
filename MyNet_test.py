@@ -26,7 +26,7 @@ elif opt.gpu_id=='1':
 
 #load the model
 model = MALNet()
-model.load_state_dict(torch.load('./model/Net.pth'))
+model.load_state_dict(torch.load('/kaggle/input/ramanet/pytorch/default/1/EORSSD.pth'))
 model.cuda()
 model.eval()
 # test
