@@ -5,7 +5,7 @@ sys.path.append('./models')
 import numpy as np
 import os, argparse
 import cv2
-from model.MyNet import MyNet as MALNet
+from model.RAMENet import MALNet
 from data_cod import test_dataset
 import time
 parser = argparse.ArgumentParser()
