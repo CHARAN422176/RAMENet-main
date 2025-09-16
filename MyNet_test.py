@@ -51,7 +51,10 @@ for dataset in test_datasets:
         gt /= (gt.max() + 1e-8)
         image = image.cuda()
         start_time = time.perf_counter()
-        res,s,s1,s2= model(image)
+        res_all = model(image)
+        print(type(res_all), len(res_all) if isinstance(res_all, (tuple, list)) else "not a tuple")
+
+        # res,s,s1,s2= model(image)
         cost_time.append(time.perf_counter()-start_time)
         res = F.upsample(res, size=gt.shape, mode='bilinear', align_corners=False)
         res = res.sigmoid().data.cpu().numpy().squeeze()
